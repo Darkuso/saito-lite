@@ -28,7 +28,7 @@ module.exports = SplashPageAppspace = {
     select 
       categories.name as 'product', 
       categories.id as 'category_id',
-      sum(products.production_daily_capacity) as 'capacity', 
+      ifnull((select capacity from categories_prices WHERE categories_prices.category_id = categories.id order by ts desc limit 1),0) as 'capacity', 
       count(products.id) as 'product_count', 
       (select group_concat( distinct (" " || certifications.name)) from certifications, products_certifications, products as p where products_certifications.certification_id = certifications.id AND products_certifications.deleted <> 1 AND products_certifications.product_id = p.id AND p.category_id = categories.id) as 'certs',
       ifnull((select price from categories_prices WHERE categories_prices.category_id = categories.id order by ts desc limit 1),0) as 'cost' 
@@ -40,6 +40,7 @@ module.exports = SplashPageAppspace = {
       categories ON products.category_id = categories.id
     where 
       products.deleted <> 1 AND 
+      products.published = 1 AND
       suppliers.deleted <> 1 
     group by 
       categories.id;
@@ -79,7 +80,7 @@ module.exports = SplashPageAppspace = {
         </div>
       `;
       pdfHTML += document.querySelector('.summary-section').innerHTML;
-      pdfHTML += `<p>For questions or purchase inquiries, please contact us at <a href="mailto:kevin@dhb.global">kevin@dhb.global</a>.</p><hr />`;
+      pdfHTML += `<p>For questions or purchase inquiries, please contact us at <a href="mailto:e.yeung@dhb.global">e.yeung@dhb.global</a>.</p><hr />`;
 
       document.getElementById('list2pdf-btn').addEventListener('click', (e) => {
         data.covid19.pdfCap(pdfHTML, 'DHB-product-list-' + new Date().toISOString().split('T')[0].replace(/-/g,'') + '.pdf');

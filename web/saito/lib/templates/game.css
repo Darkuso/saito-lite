@@ -12,6 +12,7 @@ body {
   font-size: 13px;
   padding: 0px;
   margin: 0px;
+  background-color: #4e4e4e !important;
 }
 
 .logcard {
@@ -34,6 +35,29 @@ body {
   height: 100vh;
   overflow: scroll;
   margin-top: unset;
+}
+
+.clockbox {
+  position: fixed;
+  top:0px;
+  right:0px;
+  display:inline;
+  background: #000;
+  color: red;
+  font-size:3em;
+  margin: 0 auto;
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  text-align: center;
+  -webkit-border-radius: 5px;
+  -moz-border-radius: 5px;
+  border-radius: 5px;
+  -webkit-box-shadow: rgba(0,0,0,0.2) 0px 1px 3px;
+  -moz-box-shadow: rgba(0,0,0,0.2) 0px 1px 3px;
+  box-shadow: rgba(0,0,0,0.2) 0px 1px 3px;
+  z-index: 900000;
 }
 
 .cardbox {
@@ -157,6 +181,8 @@ body {
   transform: translate(-50%, -0%);
   transition: height 0.2s ease, width 0.2s ease, right 0.2s ease;
 
+  box-shadow: 0 0 3px 3px #BBB;
+
 }
 
 /** USED WHEN TOGGLING **/
@@ -237,11 +263,13 @@ body {
 
 .status ul {
   list-style: none;
+  margin-bottom: 10px;
+  margin-top: 10px;
 }
 
 .status ul li {
   width: 100%;
-  line-height: 2em;
+  line-height: 3.5em;
   border-top: 1px solid var(--saito-skyline-grey);
   cursor: pointer;
 }

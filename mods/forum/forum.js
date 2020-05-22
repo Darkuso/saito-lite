@@ -1,7 +1,12 @@
 const saito = require('../../lib/saito/saito');
 const ModTemplate = require('../../lib/templates/modtemplate');
 
+const clip = require('text-clipper');
+const request = require('request');
+//const http = require('http');
+
 const ForumMain = require('./lib/forum-main/forum-main');
+const ForumMod = require('./lib/forum-main/forum-mod');
 const ForumRightSidebar = require('./lib/forum-right-sidebar/forum-right-sidebar');
 const ForumLeftSidebar = require('./lib/forum-left-sidebar/forum-left-sidebar');
 const ForumTeaser = require('./lib/forum-main/forum-teaser');
@@ -160,12 +165,33 @@ class Forum extends ModTemplate {
 
 
     if (txmsg.link != "") {
-      this.downloadThumbnailImage(tx.transactiobn.sig, txmsg.link);
+      //this.downloadThumbnailImage(tx.transaction.sig, txmsg.link);
+      this.grabImage(post_id, txmsg.link);
     }
 
   }
 
+  grabImage(post_id, link) {
+    const ImageResolver = require('image-resolver');
+    var resolver = new ImageResolver();
 
+    resolver.register(new ImageResolver.FileExtension());
+    resolver.register(new ImageResolver.MimeType());
+    resolver.register(new ImageResolver.Opengraph());
+    resolver.register(new ImageResolver.Webpage());
+
+    resolver.resolve(link, (result) => {
+      if (result) {
+        console.log(result.image);
+        let sql = "UPDATE posts SET img = '" + result.image + "' WHERE post_id = '" + post_id + "';"
+        this.app.storage.executeDatabase(sql, {}, "forum");
+      } else {
+        console.log("No image found");
+      }
+    });
+  }
+
+  /*
   downloadThumbnailImage(filename, link) {
 
     if (this.app.BROWSER == 1) { return; }
@@ -187,6 +213,8 @@ class Forum extends ModTemplate {
     resolver.register(new ImageResolver.Webpage());
 
     try {
+
+
       /*
             resolver.resolve(snapshot_target, (result) => {
               if ( result ) {
@@ -215,10 +243,11 @@ class Forum extends ModTemplate {
               } else {
               }
             });
-      */
+      
     } catch (err) {
     }
   }
+  */
 
 
 
@@ -317,6 +346,42 @@ class Forum extends ModTemplate {
 
   }
 
+  createReportTransaction(post_id) {
+
+    let newtx = this.app.wallet.createUnsignedTransactionWithDefaultFee();
+
+    newtx.transaction.msg.module = "Forum";
+    newtx.transaction.msg.type = "report";
+    newtx.transaction.msg.post_id = post_id;
+    newtx = this.app.wallet.signTransaction(newtx);
+
+    return newtx;
+  }
+
+  createModApproveTransaction(post_id) {
+
+    let newtx = this.app.wallet.createUnsignedTransactionWithDefaultFee();
+
+    newtx.transaction.msg.module = "Forum";
+    newtx.transaction.msg.type = "modapprove";
+    newtx.transaction.msg.post_id = post_id;
+    newtx = this.app.wallet.signTransaction(newtx);
+
+    return newtx;
+  }
+
+  createModDeleteTransaction(post_id) {
+
+    let newtx = this.app.wallet.createUnsignedTransactionWithDefaultFee();
+
+    newtx.transaction.msg.module = "Forum";
+    newtx.transaction.msg.type = "moddelete";
+    newtx.transaction.msg.post_id = post_id;
+    newtx = this.app.wallet.signTransaction(newtx);
+
+    return newtx;
+  }
+
   createDeleteTransaction(post_id) {
 
     let newtx = this.app.wallet.createUnsignedTransactionWithDefaultFee();
@@ -328,6 +393,26 @@ class Forum extends ModTemplate {
 
     return newtx;
   }
+
+  async receiveReportTransaction(tx) {
+
+    try {
+
+      let txmsg = tx.returnMessage();
+      let post_id = txmsg.post_id;
+
+      let sql = "UPDATE posts SET reported = 1 WHERE post_id = $post_id";
+      let params = { $post_id: post_id }
+      await this.app.storage.executeDatabase(sql, params, "forum");
+
+    } catch (err) {
+
+    }
+
+    return;
+
+  }
+
 
   async receiveDeleteTransaction(tx) {
 
@@ -343,9 +428,9 @@ class Forum extends ModTemplate {
       if (rows) {
         if (rows.length > 0) {
 
-	  let oldtx = new saito.transaction(JSON.parse(rows[0].tx));
-	  if (oldtx.transaction.from[0].add !== tx.transaction.from[0].add) {
-	    return;
+          let oldtx = new saito.transaction(JSON.parse(rows[0].tx));
+          if (oldtx.transaction.from[0].add !== tx.transaction.from[0].add) {
+            return;
           }
 
           sql = "DELETE FROM posts where post_id = $post_id";
@@ -356,6 +441,42 @@ class Forum extends ModTemplate {
 
         }
       }
+
+    } catch (e) {
+      console.log('ERROR - receiveDeleteTransaction: ' + e);
+    }
+
+  }
+
+
+  async receiveModDeleteTransaction(tx) {
+
+    try {
+
+      let txmsg = tx.returnMessage();
+      let post_id = txmsg.post_id;
+
+      let sql = "DELETE FROM posts WHERE post_id = $post_id";
+      let params = { $post_id: post_id }
+      await this.app.storage.executeDatabase(sql, params, "forum");
+
+    } catch (e) {
+      console.log('ERROR - receiveModDeleteTransaction: ' + e);
+    }
+
+  }
+
+
+  async receiveModApproveTransaction(tx) {
+
+    try {
+
+      let txmsg = tx.returnMessage();
+      let post_id = txmsg.post_id;
+
+      let sql = "UPDATE posts SET reported = 0 WHERE post_id = $post_id";
+      let params = { $post_id: post_id }
+      await this.app.storage.executeDatabase(sql, params, "forum");
 
     } catch (e) {
       console.log('ERROR - receiveDeleteTransaction: ' + e);
@@ -384,6 +505,8 @@ class Forum extends ModTemplate {
           let tx = new saito.transaction(JSON.parse(row.tx));
 
           let txmsg = tx.returnMessage();
+	  let subforum = txmsg.forum;
+	  if (subforum == "") { subforum = "main"; }
 
           let title = txmsg.title;
           let address = tx.transaction.from[0].add;
@@ -391,15 +514,15 @@ class Forum extends ModTemplate {
           let date = forum_self.formatDate(tx.transaction.ts);
           let votes = row.votes;
           let comments = row.comments;
-          let forum = "/forum/" + txmsg.forum;
-          let link = "/forum/" + txmsg.forum + "/" + tx.transaction.sig;
+          let forum = "/forum/" + subforum;
+          let link = "/forum/" + subforum + "/" + tx.transaction.sig;
 
-	  identifiers_to_fetch.push(tx.transaction.from[0].add);
- 
+          identifiers_to_fetch.push(tx.transaction.from[0].add);
+
           ArcadeSidebar.addPost(app, title, author, address, date, forum, link, votes, comments);
 
         });
-	//forum_self.addrController.fetchIdentifiers(identifiers_to_fetch);
+        //forum_self.addrController.fetchIdentifiers(identifiers_to_fetch);
       });
 
       return;
@@ -407,12 +530,44 @@ class Forum extends ModTemplate {
 
     if (this.browser_active == 0) { return; }
 
+    //
+    // moderation
+    //
+    if (this.view_post_id == "mod") {
+      where_clause = "reported = 1";
+
+      this.sendPeerDatabaseRequest("forum", "teasers", "*", where_clause, null, (res, data) => {
+
+	let forum_self = this;
+	forum_self.forum.mods = [];
+
+        if (res.rows) {
+
+          res.rows.forEach(row => {
+            let tx = new saito.transaction(row.tx);
+            forum_self.forum.mods.push(tx);
+          });
+
+	  let data = {};
+	  data.forum = forum_self;
+          ForumMod.render(this.app, data);
+          ForumMod.attachEvents(this.app, data);
+
+        }
+
+
+      });
+
+      return;
+    }
+
+
     let forum_self = this;
 
     let loading = "main";
 
     //
-    // load teasers from server
+    // load posts
     //
     where_clause = "";
     if (this.view_forum != 'main') {
@@ -437,7 +592,7 @@ class Forum extends ModTemplate {
 
           let tx = new saito.transaction(row.tx);
           post_ids.push(tx.transaction.sig);
-	  identifiers_to_fetch.push(tx.transaction.from[0].add);
+          identifiers_to_fetch.push(tx.transaction.from[0].add);
 
           if (loading == "main" || loading == "forum") {
             try {
@@ -518,9 +673,9 @@ class Forum extends ModTemplate {
           }
         });
 
-	//
-	// fetch identifiers
-	//
+        //
+        // fetch identifiers
+        //
         forum_self.addrController.fetchIdentifiers(identifiers_to_fetch);
 
 
@@ -570,6 +725,10 @@ class Forum extends ModTemplate {
     Header.render(app, data);
     Header.attachEvents(app, data);
 
+    if(getPreference('darkmode')) {
+      addStyleSheet("/forum/dark.css");
+    }
+
     let data = {};
     data.forum = this;
 
@@ -598,15 +757,42 @@ class Forum extends ModTemplate {
 
     let forum_self = this;
 
+
+    expressapp.get('/forum/mod', async (req, res) => {
+
+      let image = req.protocol + '://' + req.get('host') + "/forum/img/forum-logo.png";
+      let title = "Saito Forum";
+      let description = "The Saito forum is an open place to share ideas, information and links.";
+
+      let data = fs.readFileSync(__dirname + '/web/pages.html', 'utf8', (err, data) => { });
+      data = data.replace('POST_ID', "mod");
+      res.setHeader('Content-type', 'text/html');
+      res.charset = 'UTF-8';
+      res.write(data);
+      res.end();
+      return;
+
+    });
+
+
+
     expressapp.get('/forum/:subforum', async (req, res) => {
 
+      let image = req.protocol + '://' + req.get('host') + "/forum/img/forum-logo.png";
+      let title = "Saito Forum";
+      let description = "The Saito forum is an open place to share ideas, information and links.";
+      let url = req.protocol + '://' + req.get('host') + "/forum/";
       let subforum = "";
 
       if (req.params.subforum) { subforum = req.params.subforum; }
 
-      let data = fs.readFileSync(__dirname + '/web/index.html', 'utf8', (err, data) => { });
+      let data = fs.readFileSync(__dirname + '/web/pages.html', 'utf8', (err, data) => { });
       if (subforum != "") { data = data.replace('SUBFORUM', subforum); }
       data = data.replace('"OFFSET"', 0);
+      data = data.replace(/META_IMAGE/g, image);
+      data = data.replace(/META_TITLE/g, title + ": " + subforum);
+      data = data.replace(/META_DESCRIPTION/g, description);
+      data = data.replace(/META_URL/g, url + subforum);
       res.setHeader('Content-type', 'text/html');
       res.charset = 'UTF-8';
       res.write(data);
@@ -616,22 +802,45 @@ class Forum extends ModTemplate {
 
     expressapp.get('/forum/:subforum/:post_id', async (req, res) => {
 
+      let image = req.protocol + '://' + req.get('host') + "/forum/img/forum-logo.png";
+      let title = "Saito Forum";
+      let description = "The Saito forum is an open place to share ideas, information and links.";
+      let url = req.protocol + '://' + req.get('host') + "/forum/";
+
       let subforum = "";
       let post_id = "";
 
       if (req.params.subforum) { subforum = req.params.subforum; }
       if (req.params.post_id) { post_id = req.params.post_id; }
 
-      let data = fs.readFileSync(__dirname + '/web/index.html', 'utf8', (err, data) => { });
+      let sql = "SELECT img, title, content FROM posts WHERE post_id = '" + post_id + "' LIMIT 1";
+      let rows = await this.app.storage.queryDatabase(sql, {}, 'forum');
+
+      if (rows) {
+        rows.forEach(row => {
+          if (row.img.length > 0) { image = row.img }
+          title = row.title;
+          //truncate to the first 300 char then finish the word.
+          //todo - respect html and markdown
+          description = clip(row.content, 300)
+        });
+      }
+
+      let data = fs.readFileSync(__dirname + '/web/pages.html', 'utf8', (err, data) => { });
       if (post_id != "") { data = data.replace('POST_ID', post_id); }
       if (subforum != "") { data = data.replace('SUBFORUM', subforum); }
       data = data.replace('"OFFSET"', 0);
+      data = data.replace(/META_IMAGE/g, image);
+      data = data.replace(/META_TITLE/g, title);
+      data = data.replace(/META_DESCRIPTION/g, description);
+      data = data.replace(/META_URL/g, url + subforum + "/" + post_id);
       res.setHeader('Content-type', 'text/html');
       res.charset = 'UTF-8';
       res.write(data);
       res.end();
       return;
     });
+
 
   }
 
@@ -702,7 +911,7 @@ class Forum extends ModTemplate {
       if (where_clause.toString().indexOf('INDEX') > -1) { return; }
       if (where_clause.toString().indexOf('DELETE') > -1) { return; }
 
-      let sql = "SELECT tx, votes, comments FROM posts WHERE " + where_clause + " ORDER BY rank DESC LIMIT 100";
+      let sql = "SELECT tx, votes, comments, img FROM posts WHERE " + where_clause + " ORDER BY rank DESC LIMIT 100";
 
       console.log(sql);
 
@@ -724,6 +933,7 @@ class Forum extends ModTemplate {
 
           newtx.transaction.votes = rows2[i].votes;
           newtx.transaction.comments = rows2[i].comments;
+          newtx.transaction.img = rows2[i].img;
           res.rows.push({ tx: newtx.transaction });
         }
       }
@@ -763,6 +973,18 @@ class Forum extends ModTemplate {
 
         if (tx.transaction.msg.type == "delete") {
           forum_self.receiveDeleteTransaction(tx);
+        }
+
+        if (tx.transaction.msg.type == "moddelete") {
+          forum_self.receiveModDeleteTransaction(tx);
+        }
+
+        if (tx.transaction.msg.type == "modapprove") {
+          forum_self.receiveModApproveTransaction(tx);
+        }
+
+        if (tx.transaction.msg.type == "report") {
+          forum_self.receiveReportTransaction(tx);
         }
       }
     }
@@ -848,9 +1070,9 @@ class Forum extends ModTemplate {
     let id = this.app.keys.returnIdentifierByPublicKey(author);
 
     if (id == "") {
-      return '<span class="saito-address saito-address-'+author+'">'+author.substring(0, 8)+'...</span>';
+      return '<span class="saito-address saito-address-' + author + '">' + author + '...</span>';
     } else {
-      return '<span class="">'+id+'</span>';
+      return '<span class="">' + id + '</span>';
     }
   }
 
